@@ -18,7 +18,7 @@
   <modelVersion>4.0.0</modelVersion>
   
   <artifactId>zxingorg</artifactId>
-  <version>3.1.1-SNAPSHOT</version>
+  <version>3.3.1-SNAPSHOT</version>
   <packaging>war</packaging>
 
   <dependencies>
@@ -33,7 +33,7 @@
     <dependency>
       <groupId>javax</groupId>
       <artifactId>javaee-web-api</artifactId>
-      <version>6.0</version>
+      <version>7.0</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -45,7 +45,7 @@
   <parent>
     <groupId>com.google.zxing</groupId>
     <artifactId>zxing-parent</artifactId>
-    <version>3.1.1-SNAPSHOT</version>
+    <version>3.3.1-SNAPSHOT</version>
   </parent>
   
   <build>
@@ -53,15 +53,11 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-war-plugin</artifactId>
-        <configuration>
-          <warSourceDirectory>src/web</warSourceDirectory>
-          <failOnMissingWebXml>false</failOnMissingWebXml>
-        </configuration>
       </plugin>
       <plugin>
         <groupId>org.eclipse.jetty</groupId>
         <artifactId>jetty-maven-plugin</artifactId>
-        <version>9.3.0.M0</version>
+        <version>9.4.0.RC0</version>
       </plugin>
     </plugins>
   </build>

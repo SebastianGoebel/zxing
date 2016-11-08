@@ -34,7 +34,6 @@ import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.multi.GenericMultipleBarcodeReader;
 import com.google.zxing.multi.MultipleBarcodeReader;
 
-import com.google.common.collect.Lists;
 import com.google.common.io.Resources;
 import com.google.common.net.HttpHeaders;
 import com.google.common.net.MediaType;
@@ -51,6 +50,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -80,20 +80,20 @@ import javax.servlet.http.Part;
  * @author Sean Owen
  */
 @MultipartConfig(
-    maxFileSize = 10_000_000,
-    maxRequestSize = 10_000_000,
-    fileSizeThreshold = 1_000_000,
+    maxFileSize = 1L << 26, // ~64MB
+    maxRequestSize = 1L << 26, // ~64MB
+    fileSizeThreshold = 1 << 20, // ~1MB
     location = "/tmp")
-@WebServlet("/w/decode")
+@WebServlet(value = "/w/decode", loadOnStartup = 1)
 public final class DecodeServlet extends HttpServlet {
 
   private static final Logger log = Logger.getLogger(DecodeServlet.class.getName());
 
-  // No real reason to let people upload more than a 10MB image
-  private static final long MAX_IMAGE_SIZE = 10_000_000L;
-  // No real reason to deal with more than maybe 10 megapixels
-  private static final int MAX_PIXELS = 10_000_000;
-  private static final byte[] REMAINDER_BUFFER = new byte[32768];
+  // No real reason to let people upload more than ~64MB
+  private static final long MAX_IMAGE_SIZE = 1L << 26;
+  // No real reason to deal with more than ~64 megapixels
+  private static final int MAX_PIXELS = 1 << 26;
+  private static final byte[] REMAINDER_BUFFER = new byte[1 << 16];
   private static final Map<DecodeHintType,Object> HINTS;
   private static final Map<DecodeHintType,Object> HINTS_PURE;
 
@@ -204,13 +204,13 @@ public final class DecodeServlet extends HttpServlet {
 
     try {
       connection.connect();
-    } catch (IOException ioe) {
+    } catch (IOException | IllegalArgumentException e) {
       // Encompasses lots of stuff, including
       //  java.net.SocketException, java.net.UnknownHostException,
       //  javax.net.ssl.SSLPeerUnverifiedException,
       //  org.apache.http.NoHttpResponseException,
       //  org.apache.http.client.ClientProtocolException,
-      log.info(ioe.toString());
+      log.info(e.toString());
       errorResponse(request, response, "badurl");
       return;
     }
@@ -244,9 +244,8 @@ public final class DecodeServlet extends HttpServlet {
 
   private static void consumeRemainder(InputStream is) {
     try {
-      int available;
-      while ((available = is.available()) > 0) {
-        is.read(REMAINDER_BUFFER, 0, available); // don't care about value, or collision
+      while (is.read(REMAINDER_BUFFER) > 0) {
+        // don't care about value, or collision
       }
     } catch (IOException | IndexOutOfBoundsException ioe) {
       // sun.net.www.http.ChunkedInputStream.read is throwing IndexOutOfBoundsException
@@ -264,6 +263,10 @@ public final class DecodeServlet extends HttpServlet {
       log.info("File upload was too large or invalid");
       errorResponse(request, response, "badimage");
       return;
+    } catch (IOException ioe) {
+      log.info(ioe.toString());
+      errorResponse(request, response, "badurl");
+      return;
     }
     Part fileUploadPart = null;
     for (Part part : parts) {
@@ -276,7 +279,7 @@ public final class DecodeServlet extends HttpServlet {
       log.info("File upload was not multipart");
       errorResponse(request, response, "badimage");
     } else {
-      log.info("Decoding uploaded file");
+      log.info("Decoding uploaded file " + fileUploadPart.getSubmittedFileName());
       try (InputStream is = fileUploadPart.getInputStream()) {
         processStream(is, request, response);
       }
@@ -316,7 +319,7 @@ public final class DecodeServlet extends HttpServlet {
 
     LuminanceSource source = new BufferedImageLuminanceSource(image);
     BinaryBitmap bitmap = new BinaryBitmap(new GlobalHistogramBinarizer(source));
-    Collection<Result> results = Lists.newArrayListWithCapacity(1);
+    Collection<Result> results = new ArrayList<>(1);
 
     try {
 
@@ -371,7 +374,15 @@ public final class DecodeServlet extends HttpServlet {
       }
   
       if (results.isEmpty()) {
-        handleException(savedException, request, response);
+        try {
+          throw savedException == null ? NotFoundException.getNotFoundInstance() : savedException;
+        } catch (FormatException | ChecksumException e) {
+          log.info(e.toString());
+          errorResponse(request, response, "format");
+        } catch (ReaderException e) { // Including NotFoundException
+          log.info(e.toString());
+          errorResponse(request, response, "notfound");
+        }
         return;
       }
 
@@ -395,25 +406,6 @@ public final class DecodeServlet extends HttpServlet {
     } else {
       request.setAttribute("results", results);
       request.getRequestDispatcher("decoderesult.jspx").forward(request, response);
-    }
-  }
-
-  private static void handleException(ReaderException re,
-                                      HttpServletRequest request,
-                                      HttpServletResponse response)
-      throws IOException, ServletException {
-    if (re instanceof NotFoundException) {
-      log.info("Not found: " + re);
-      errorResponse(request, response, "notfound");
-    } else if (re instanceof FormatException) {
-      log.info("Format problem: " + re);
-      errorResponse(request, response, "format");
-    } else if (re instanceof ChecksumException) {
-      log.info("Checksum problem: " + re);
-      errorResponse(request, response, "format");
-    } else {
-      log.info("Unknown problem: " + re);
-      errorResponse(request, response, "notfound");
     }
   }
 
